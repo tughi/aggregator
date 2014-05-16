@@ -11,7 +11,7 @@ reader = Bottle()
 
 @reader.get('/session')
 def session():
-    select = 'SELECT id FROM entry'
+    select = 'SELECT DISTINCT id FROM entry'
 
     where = []
     whereArgs = []
