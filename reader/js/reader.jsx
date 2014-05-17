@@ -1,34 +1,53 @@
 /** @jsx React.DOM */
 
-var Entry = React.createClass({
+var EntryMixin = {
+	formatDate: function (date) {
+		var date = moment(date);
+	    var now = moment();
+	    if (now.year() != date.year()) {
+	    	return date.format("MMM DD YYYY");
+	    }
+	    if (now.date() == date.date() && now.month() == date.month()) {
+	    	return date.format("hh:mm a");
+	    }
+		return date.format("MMM DD");
+	}
+};
+
+var ClosedEntry = React.createClass({
+	mixins: [EntryMixin],
 	render: function () {
-        var date = moment(this.props.data.updated);
-        var now = moment();
-        var dateFormat = now.year() != date.year() ? "MMM DD YYYY" : now.date() == date.date() && now.month() == date.month() ? "hh:mm a" : "MMM DD";
-
-        console.log(this.props.feeds);
-
 		return (
-		    <div className="entry">
+		    <div className={'entry' + (this.props.active ? ' active' : '')}>
 		        <div id="header">
 		            <div id="title-wrapper">
-		                <span id="title">{this.props.data.title || 'Loading...'}</span>
+		                <span id="title">{this.props.entry.title}</span>
 		            </div>
 		            <div id="date-wrapper">
-		                <span id="fadeout"></span><span id="date">{date.format(dateFormat)}</span>
+		                <span id="fadeout"></span><span id="date">{this.formatDate(this.props.entry.updated)}</span>
 		            </div>
 		            <div id="toggle"></div>
-		            <a id="favicon" target="_blank" href={this.props.data.link} style={{'background-image': 'url("' + this.props.feeds[this.props.data.feed_id].favicon + '")'}}></a>
+		            <a id="favicon" target="_blank" href={this.props.entry.link} style={{'background-image': 'url("' + this.props.entry.feed.favicon + '")'}}></a>
 		            <span id="star"></span>
 		        </div>
+		    </div>
+		);
+	}
+});
+
+var OpenedEntry = React.createClass({
+	mixins: [EntryMixin],
+	render: function () {
+		return (
+		    <div className={'entry open' + (this.props.active ? ' active' : '')}>
 		        <div id="body">
 		            <div id="content">
 		                <div id="content-header">
-		                    <h1><a id="title"></a></h1>
+		                    <h1><a id="title">{this.props.entry.title}</a></h1>
 		                    <div>
 		                        <span id="author-container">by <span id="author"></span>,</span>
 		                        <a id="feed"></a>
-		                        <span id="date-container">on <span id="date"></span></span>
+		                        <span id="date-container">on <span id="date">{this.formatDate(this.props.entry.updated)}</span></span>
 		                        <span id="star" onclick="javascript: return false"></span>
 		                    </div>
 		                    <div id="tags">
@@ -46,58 +65,97 @@ var Entry = React.createClass({
 
 var Session = React.createClass({
 	getInitialState: function () {
-		return {feeds: {}, entries: []};
+		return {
+			active: -1,
+			opened: -1,
+			entries: [],
+			data: {
+				feeds: {}, 
+				entries: []
+			}
+		};
 	},
 	componentWillMount: function () {
 		$.ajax({
 			url: this.props.url,
 			dataType: 'json',
 			success: function (data) {
-				this.setState({feeds: data.feeds});
+				this.setState({data: data});
 
-				if (data.entries) {
-					var entries = [];
-					data.entries.map(function (id) {
-						entries.push({id: id});
-					});
-
+				if (data.entries.length) {
 					// fetch first page
-					this.fetchPage(0, entries);
+					this.fetchNextPage();
 				}
 			}.bind(this)
 		});
 	},
-	fetchPage: function (page, entries) {
-		var pageStart = page * 50;
-		var pageEnd = (page + 1) * 50;
+	fetchNextPage: function () {
+		var ids = this.state.data.entries;
+		var entries = this.state.entries;
 
-		var ids = [];
-		(entries || this.state.entries).slice(pageStart, pageEnd).map(function (entry) {
-			ids.push(entry.id);
-		});
+		if (ids.length > entries.length) {
+			this.waitNextPage = true;
+			$.ajax({
+				url: 'api/entries',
+				data: {ids: ids.slice(entries.length, entries.length + 50).join(',')},
+				success: function (data) {
+					// add feed data
+					data.map(function (entry) {
+						entry.feed = this.state.data.feeds[entry.feed_id];
+					}.bind(this));
 
-		$.ajax({
-			url: 'api/entries',
-			data: {ids: ids.join(',')},
-			success: function (data) {
-				var newEntries = entries || this.state.entries;
-				var index = pageStart;
-				while (index < pageEnd) {
-					newEntries[index] = data[index++ % 50];
-				}
+					// update entries state
+					this.setState({entries: this.state.entries.concat(data)});
 
-				this.setState({entries: newEntries});
-			}.bind(this)
-		});
+					this.waitNextPage = false;
+				}.bind(this)
+			});
+		}
+	},
+	handleScroll: function (event) {
+		if (!this.waitNextPage) {
+			var content = event.target;
+			if (content.scrollHeight - content.scrollTop - content.offsetHeight < 600) {
+				this.fetchNextPage();
+			}
+		}
+	},
+	handleKeyDown: function (event) {
+		var nextActive = Math.min(this.state.active + 1, this.state.entries.length - 1);
+		var prevActive = Math.max(this.state.active - 1, 0);
+		console.log(event.which);
+		switch (event.which) {
+		case 74: // j
+			this.setState({active: nextActive, opened: nextActive});
+			break;
+		case 75: // k
+			this.setState({active: prevActive, opened: prevActive});
+			break;
+		case 78: // n
+			this.setState({active: nextActive});
+			break;
+		case 79: // o
+			// toggle opened
+			this.setState({opened: this.state.opened === this.state.active ? -1 : this.state.active});
+			break;
+		case 80: // p
+			this.setState({active: prevActive});
+			break;
+		}
 	},
 	render: function () {
-		var entryNodes = this.state.entries.map(function (entry) {
-			return <Entry key={entry.id} data={entry} feeds={this.state.feeds} />;
+		var entryNodes = this.state.entries.map(function (entry, index) {
+			if (index === this.state.opened) {
+				return <OpenedEntry key={entry.id} ref={index} entry={entry} active={index === this.state.active} />;
+			}
+			return <ClosedEntry key={entry.id} ref={index} entry={entry} active={index === this.state.active} />;
 		}.bind(this));
 
 		return (
-			<div id="entries">
-				{entryNodes}
+			<div id="content" ref="content" onScroll={this.handleScroll} onKeyDown={this.handleKeyDown}>
+				<div id="entries">
+					{entryNodes}
+				</div>
 			</div>
 		);
 	}
