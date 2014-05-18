@@ -1,80 +1,70 @@
+var TAG_READ = 1;
+var TAG_STAR = 2;
+
+function Session() {
+    this.loadOptions();
+
+    this.active = -1;
+    this.opened = -1;
+
+    $.ajax({
+        url: 'reader/session',
+        data: this.options,
+        dataType: 'json',
+        success: function (data) {
+            this.data = data;
+        }.bind(this),
+        error: function () {
+            this.data = {
+                feeds: {},
+                entries: []
+            }
+        }.bind(this)
+    });
+}
+
+Session.prototype.loadOptions = function() {
+    var options = {
+        without_tags: TAG_READ,
+        order: "<"
+    };
+
+    var hashMatch = /^#(\d+)?(!(\d+))?([<>])(\|(\d+))?/g.exec(window.location.hash);
+
+    if (hashMatch) {
+        if (hashMatch[1]) {
+            options["with_tags"] = hashMatch[1];
+            options["without_tags"] = hashMatch[3] || null;
+        } else {
+            options["with_tags"] = null;
+            options["without_tags"] = hashMatch[3];
+        }
+
+        options["order"] = hashMatch[4];
+
+        options["feed_id"] = hashMatch[6] || null;
+    }
+
+    for (var key in options) {
+        if (options[key] == null) {
+            delete options[key];
+        }
+    }
+
+    this.options = options;
+};
+
+var session = new Session();
+
+$(window).on("hashchange", function () {
+    session = new Session();
+});
+
 $(function () {
 
     $("body").addClass(navigator.userAgent.match(/Android|iPhone|iPad|iPod/i) ? "mobile" : "desktop");
 
-    var TAG_READ = 1;
-    var TAG_STAR = 2;
-
-    var Entry = Backbone.Model.extend({
-    });
-
-    var Entries = Backbone.Collection.extend({
-        model: Entry,
-        url: "api/entries"
-    });
-
-    var SessionOptions = Backbone.Model.extend({
-        initialize: function () {
-            var model = this;
-
-            model.listenTo(model, "change", model.storeData);
-
-            $(window).on("hashchange", function () {
-                model.loadData();
-            });
-        },
-
-        loadData: function () {
-            var values = {
-                without_tags: TAG_READ,
-                order: "<"
-            };
-
-            var hashMatch = /^#(\d+)?(!(\d+))?([<>])(\|(\d+))?/g.exec(window.location.hash);
-
-            if (hashMatch) {
-                if (hashMatch[1]) {
-                    values["with_tags"] = hashMatch[1];
-                    values["without_tags"] = hashMatch[3] || null;
-                } else {
-                    values["with_tags"] = null;
-                    values["without_tags"] = hashMatch[3];
-                }
-
-                values["order"] = hashMatch[4];
-
-                values["feed_id"] = hashMatch[6] || null;
-            }
-
-            this.set(values);
-        },
-
-        storeData: function () {
-            var hash = "#";
-
-            var with_tags = this.get("with_tags");
-            if (with_tags) {
-                hash += with_tags;
-            }
-
-            var without_tags = this.get("without_tags");
-            if (without_tags) {
-                hash += "!" + without_tags;
-            }
-
-            var order = this.get("order");
-            if (order) {
-                hash += order;
-            }
-
-            var feed_id = this.get("feed_id");
-            if (feed_id) {
-                hash += "|" + feed_id;
-            }
-
-            window.location.hash = hash;
-        }
-    });
+    session.reload();
 
     var Session = Backbone.Model.extend({
         url: "reader/session",
