@@ -1,110 +1,149 @@
-var TAG_READ = 1;
-var TAG_STAR = 2;
-
-function Session() {
-    this.loadOptions();
-
-    this.active = -1;
-    this.opened = -1;
-
-    $.ajax({
-        url: 'reader/session',
-        data: this.options,
-        dataType: 'json',
-        success: function (data) {
-            this.data = data;
-        }.bind(this),
-        error: function () {
-            this.data = {
-                feeds: {},
-                entries: []
-            }
-        }.bind(this)
-    });
-}
-
-Session.prototype.loadOptions = function() {
-    var options = {
-        without_tags: TAG_READ,
-        order: "<"
-    };
-
-    var hashMatch = /^#(\d+)?(!(\d+))?([<>])(\|(\d+))?/g.exec(window.location.hash);
-
-    if (hashMatch) {
-        if (hashMatch[1]) {
-            options["with_tags"] = hashMatch[1];
-            options["without_tags"] = hashMatch[3] || null;
-        } else {
-            options["with_tags"] = null;
-            options["without_tags"] = hashMatch[3];
-        }
-
-        options["order"] = hashMatch[4];
-
-        options["feed_id"] = hashMatch[6] || null;
-    }
-
-    for (var key in options) {
-        if (options[key] == null) {
-            delete options[key];
-        }
-    }
-
-    this.options = options;
-};
-
-var session = new Session();
-
-$(window).on("hashchange", function () {
-    session = new Session();
-});
-
 $(function () {
 
     $("body").addClass(navigator.userAgent.match(/Android|iPhone|iPad|iPod/i) ? "mobile" : "desktop");
 
-    session.reload();
+    var TAG_READ = 1;
+    var TAG_STAR = 2;
 
-    var Session = Backbone.Model.extend({
-        url: "reader/session",
-        options: new SessionOptions,
+    var $feeds = $('#feeds');
+    var _feedsTemplate = _.template($('script#feeds-template').text());
 
-        initialize: function () {
-            this.listenTo(this.options, "change", this.reload);
+    var $entries = $('#entries');
+    var _entriesTemplate = _.template($('script#entries-template').text());
 
-            this.options.loadData();
-        },
+    function Session() {
+        this.loadOptions();
 
-        hasFeeds: function () {
-            var feeds = this.get("feeds");
-            if (feeds) {
-                for (var key in feeds) {
-                    return true;
-                }
+        this.data = {
+            feeds: {},
+            entries: []
+        };
+        this.entries = [];
+        this.active = -1;
+        this.opened = -1;
+
+        this.requestSession();
+    }
+
+    Session.prototype.loadOptions = function () {
+        var options = {
+            without_tags: TAG_READ,
+            order: "<"
+        };
+
+        var hashMatch = /^#(\d+)?(!(\d+))?([<>])(\|(\d+))?/g.exec(window.location.hash);
+
+        if (hashMatch) {
+            if (hashMatch[1]) {
+                options["with_tags"] = hashMatch[1];
+                options["without_tags"] = hashMatch[3] || null;
+            } else {
+                options["with_tags"] = null;
+                options["without_tags"] = hashMatch[3];
             }
-            return false;
-        },
 
-        hasEntries: function () {
-            var entries = this.get("entries");
-            return entries && entries.length;
-        },
+            options["order"] = hashMatch[4];
 
-        reload: function () {
-            var options = this.options.toJSON();
-            for (var key in options) {
-                if (options[key] == null) {
-                    delete options[key];
-                }
-            }
-
-            this.clear();
-            this.fetch({data: options});
+            options["feed_id"] = hashMatch[6] || null;
         }
+
+        for (var key in options) {
+            if (options[key] == null) {
+                delete options[key];
+            }
+        }
+
+        this.options = options;
+    };
+
+    Session.prototype.requestSession = function () {
+        $.ajax({
+            url: 'reader/session',
+            data: this.options,
+            dataType: 'json',
+            success: function (data) {
+                this.data = data;
+                this.now = moment();
+                this.renderFeeds();
+                this.requestNextPage();
+            }.bind(this),
+            error: function () {
+                alert('Failed to load session');
+            }.bind(this)
+        });
+    };
+
+    Session.prototype.renderFeeds = function () {
+        $feeds.empty().append(_feedsTemplate({'session': this}));
+    };
+
+    Session.prototype.getTotalUnreadCount = function() {
+        var result = 0;
+
+        var feeds = this.data.feeds;
+        for (var key in feeds) {
+            result += feeds[key].count;
+        }
+
+        return result;
+    };
+
+    Session.prototype.requestNextPage = function () {
+        if (this.waitNextPage) {
+            return;
+        }
+
+        var loadedEntries = this.entries.length;
+        var ids = this.data.entries;
+        if (loadedEntries < ids.length) {
+            this.waitNextPage = true;
+
+            $.ajax({
+                url: 'api/entries',
+                data: {ids: ids.slice(loadedEntries, loadedEntries + 50).join(',')},
+                dataType: 'json',
+                success: function (data) {
+                    this.waitNextPage = false;
+                    this.entries = this.entries.concat(data);
+                    $entries.append(_entriesTemplate({session: this, entries: data}));
+                }.bind(this),
+                error: function () {
+                    this.waitNextPage = false;
+                    alert('Failed to load next page!');
+                }.bind(this)
+            });
+        }
+    };
+
+    Session.prototype.formatDate = function (date) {
+        var date = moment(date);
+        var now = this.now;
+        if (now.year() != date.year()) {
+            return date.format("MMM DD YYYY");
+        }
+        if (now.date() == date.date() && now.month() == date.month()) {
+            return date.format("hh:mm a");
+        }
+        return date.format("MMM DD");
+    };
+
+    var session = new Session();
+
+    $(window).on("hashchange", function () {
+        session = new Session();
     });
 
-    var session = new Session;
+    $entries.parent().scroll(function () {
+        var $container = $(this);
+        
+        if ($container.scrollTop() > $entries.height() - $container.height() - 300) {
+            session.requestNextPage();
+        }
+    });
+});
+
+/*
+$(function () {
 
     var FeedsView = Backbone.View.extend({
         el: $("#feeds"),
@@ -508,3 +547,4 @@ $(function () {
     });
 
 });
+*/
